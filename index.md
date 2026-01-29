@@ -23,7 +23,7 @@ Dans ce laboratoire, votre tâche est d'implémenter un système de multiplexage
 
 ## 3. Préparation et outils nécessaires
 
-Ce laboratoire ne nécessite l'installation d'aucune librairie particulière. Comme pour le laboratoire 2, un projet VScode vous est fourni avec des scripts de configuration et une première structure de code. Vous pouvez le récupérer sur le dépôt Git suivant : [https://github.com/setr-ulaval/labo3-h25](https://github.com/setr-ulaval/labo3-h25). Ce dépôt contient aussi des fonctions qui vous sont fournies pour implémenter certaines fonctionnalités du système. De même, plusieurs fichiers d'en-tête (*headers*) vous sont fournis afin de vous guider dans l'implémentation du système. Votre Raspberry Pi Zero devra _être branché sur un écran_ pour pouvoir observer le résultat, puisque nous écrivons directement dans la mémoire du GPU. Utilisez le convertisseur mini-HDMI à HDMI qui vous a été fourni à cet effet.
+Ce laboratoire ne nécessite l'installation d'aucune librairie particulière. Comme pour le laboratoire 2, un projet VScode vous est fourni avec des scripts de configuration et une première structure de code. Vous pouvez le récupérer sur le dépôt Git suivant : [https://github.com/setr-ulaval/labo3-h26](https://github.com/setr-ulaval/labo3-h26). Ce dépôt contient aussi des fonctions qui vous sont fournies pour implémenter certaines fonctionnalités du système. De même, plusieurs fichiers d'en-tête (*headers*) vous sont fournis afin de vous guider dans l'implémentation du système. Votre Raspberry Pi Zero devra _être branché sur un écran_ pour pouvoir observer le résultat, puisque nous écrivons directement dans la mémoire du GPU. Utilisez le convertisseur mini-HDMI à HDMI qui vous a été fourni à cet effet.
 
 > **Note** : comme pour le laboratoire 2, vous **devez** modifier les fichiers `.vscode/launch.json` et `syncAndStartGDB.sh` pour y écrire l'adresse de votre Raspberry Pi. Attention, dans le cas du fichier `launch.json`, vous devez le faire à **5** endroits. Assurez-vous également que le dossier `/home/pi/projects/laboratoire3` existe sur votre Raspberry Pi.
 
@@ -51,19 +51,85 @@ Tous les processus sont des processus avec des contraintes temps réel et la plu
 
 ### 4.1. Création d'un espace mémoire partagé
 
-Un espace mémoire partagé peut être créé en utilisant la fonction `shm_open`. Cet espace mémoire possédant initialement une taille de zéro, il faut donc l'agrandir en utilisant la fonction `ftruncate`. Finalement, cet espace est, par défaut, vu comme un fichier, ce qui est peu pratique. Pour faciliter son utilisation, nous nous servons de `mmap` qui permet d'utiliser cet espace d'échange comme un pointeur normal. La structure de cette zone mémoire partagée est présentée à la figure suivante.
+Un espace mémoire partagé peut être créé en utilisant la fonction `shm_open`. Cet espace mémoire possédant initialement une taille de zéro, il faut donc l'agrandir en utilisant la fonction `ftruncate`. Finalement, cet espace est, par défaut, vu comme un fichier, ce qui est peu pratique. Pour faciliter son utilisation, nous nous servons de `mmap` qui permet d'utiliser cet espace d'échange comme un pointeur normal. Cette zone mémoire partagée possède un en-tête défini par la structure suivante (présente dans le fichier `commMemoirePartagee.h`) :
 
-<img src="img/diag_mem.png" style="width:1000px"/>
+```
+struct memPartageHeader{
+    pthread_mutex_t mutex;          // Mutex pour protéger les conditions
+    pthread_cond_t condWriter;      // Condition sur laquelle le writer attend
+    pthread_cond_t condReader;      // Condition sur laquelle le reader attend
+    volatile uint32_t etat;         // État de synchronisation (voir constantes ETAT_*)
+    struct videoInfos infos;        // Informations sur la vidéo
+};
+```
 
-Les vingt-quatre premiers octets permettent de stocker une primitive de synchronisation. Les huit octets suivants contiennent des compteurs permettant de déterminer la trame sur laquelle travaillent les processus écrivain et lecteur (et ainsi éviter de traiter deux fois la même trame). Les 6 octets suivants rapportent des informations à propos des images qui seront transmises. Ils sont suivis d'un entier indiquant le nombre d'images par seconde fournies par la source vidéo. Finalement, les données sont présentées sous la forme d'un tableau de *char*, dont la longueur dépend des dimensions de l'image.
+Comme vous pouvez le constater, nous utiliserons des _conditions POSIX_ pour synchroniser les différents processus. Cet en-tête contient également un entier nommé `etat`, dont nous discuterons de l'utilité à la sous-section suivante. Finalement, l'en-tête permet de propager les caractéristiques de la vidéo (hauteur, largeur, nombre de canaux et nombre d'images par seconde). La suite de la mémoire partagée permet d'écrire les images à proprement parler, sous forme d'un tableau de *char*, dont la longueur est le produit de la largeur, la hauteur et le nombre de canaux spécifiés dans `infos`.
+
 
 ### 4.2. Synchronisation
 
 La communication se faisant par espace mémoire partagé, il est important que les différents processus soient synchronisés. Par exemple, lorsque le processus écrit dans la mémoire, le lecteur doit attendre la fin de cette écriture pour lire, au risque de se retrouver avec une image composée de deux trames vidéo différentes. De même, si le processus écrivain ne peut fournir un débit suffisant, le processus lecteur ne doit pas recommencer inutilement le traitement de la même trame.
 
+La variable `etat` permet de savoir l'état actuel de la zone mémoire partagée. Elle peut prendre 3 valeurs :
+
+```
+// États de synchronisation
+#define ETAT_NON_INITIALISE    0
+#define ETAT_PRET_SANS_DONNEES 1
+#define ETAT_PRET_AVEC_DONNEES 2
+```
+
+Si on met de côté `ETAT_NON_INITIALISE` pour le moment, on peut voir qu'il y a deux états possibles : *avec* ou *sans* données. Cela nous permet donc de synchroniser les processus lecteur et écrivain. L'écrivain n'écrit _que_ dans l'état `ETAT_PRET_SANS_DONNEES` (et change l'état pour `ETAT_PRET_AVEC_DONNEES` lorsqu'il a terminé) alors que le lecteur ne lit _que_ dans l'état `ETAT_PRET_AVEC_DONNEES` (et change l'état pour `ETAT_PRET_SANS_DONNEES` lorsqu'il a terminé). Toutefois, utiliser seulement une variable comme celle-ci n'est pas suffisant pour assurer une bonne synchronisation. En particulier, nous ne voulons pas effectuer une attente _active_ (où un processus testerait en permanance la valeur de `etat` pour détecter un changement), car cela consommerait énormément de cycles processeur inutilement. De même, simplement mettre en pause le processus (par exemple avec la fonction POSIX `usleep`) ne résoud pas le problème : un trop long délai (ex. 100 ms) peut créer une latence nuisible si les données sont finalement disponibles après une fraction de ce délai (ex. 1 ms, ce qui fait que le processus "dort" pendant 99 ms alors qu'il a du travail à faire), alors qu'un trop court délai revient au problème de l'attente active. Nous voulons une solution où un processus se "réveille" _dès_ qu'il a du travail à faire et se met en pause _dès_ qu'il est terminé.
+
+Pour ce faire, nous allons utiliser les conditions POSIX. Celles-ci peuvent être référencées par un objet de type `pthread_cond_t`, qui peut être partagé entre processus. Pour fonctionner, la condition a également besoin d'un mutex (référencé par un objet de type `pthread_mutex_t`). Nous allons utiliser deux conditions : une pour signaler au _lecteur_ que l'écrivain a terminé le traitement d'une trame et que celle-ci est présente dans la zone mémoire partagée et l'autre pour signaler à _l'écrivain_ que le lecteur a terminé la lecture de la trame présentement dans la zone mémoire partagée et que l'écrivain peut donc commencer à en écrire une nouvelle. Ces deux conditions étant mutuellement exclusives, le même mutex peut être utilisé pour protéger les deux.
+
 Le problème de synchronisation est complexifié par le fait qu'il faille gérer *l'inversion de priorité*. Cela signifie que nous devons configurer les mutex avec les attributs leur permettant d'être partagés entre les processus et de tenir compte de potentielles inversions de priorité.
 
-Un mutex peut être référencé par un objet de type `pthread_mutex_t`, qui peut être partagé entre processus. Il est donc possible de le partager facilement dans un espace mémoire partagé. Dans notre cas, il nous permet de bloquer le lecteur tant que l'écrivain n'a pas écrit une trame complète et de bloquer l'écrivain tant que le lecteur n'a pas copié l'entièreté de la trame. Vous êtes libres de concevoir votre propre algorithme de synchronisation adapté à ce problème, mais nous vous fournissons une approche fonctionnelle que vous pouvez utiliser. Celle-ci est illustrée à la figure suivante.
+#### 4.2.1. Algorithme de synchronisation de la boucle principale
+
+Vous devez implémenter les fonctions suivantes dans `commMemoirePartagee.c`, et les utiliser dans votre code pour synchroniser les accès à la mémoire partagée :
+
+- `attenteLecteur`, qui est appelée par la portion _lecteur_ d'un processus lorsqu'il attend que des données soient disponibles sur la zone mémoire partagée. Cette fonction peut soit retourner immédiatement si des données sont _déjà_ disponibles, soit _bloquer_ et mettre le processus en pause (en attendant sur la condition POSIX) jusqu'à ce que ce soit le cas.
+- `attenteEcrivain`, qui est appelée par la portion _ecrivain_ d'un processus lorsqu'il attend que la zone mémoire partagée soit lue par le processus lecteur pour pouvoir y écrire autre chose. Cette fonction peut soit retourner immédiatement si la zone a _déjà_ été lue, soit _bloquer_ et mettre le processus en pause (en attendant sur la condition POSIX) jusqu'à ce que ce soit le cas.
+- `signalLecteur`, qui est appelée par la portion _lecteur_ d'un processus lorsqu'il a terminé d'utiliser les données dans la zone mémoire partagée et que celle-ci peut donc recevoir de nouvelles données de la part de l'écrivain. En d'autres termes, cette fonction _signale_ à la condition POSIX que l'attente éventuelle d'un écrivain peut s'interrompre. Elle ne devrait jamais bloquer. 
+- `signalEcrivain`, qui est appelée par la portion _ecrivain_ d'un processus lorsqu'il a terminé d'écrire les données dans la zone mémoire partagée et que celle-ci peut donc être lue par le lecteur. En d'autres termes, cette fonction _signale_ à la condition POSIX que l'attente éventuelle d'un lecteur peut s'interrompre. Elle ne devrait jamais bloquer. 
+- `attenteLecteurAsync` est une fonction particulière qui ne doit être utilisé que dans le programme _compositeur_. Elle doit faire la même chose que `attenteLecteur`, mais _sans bloquer_ si les données ne sont pas prêtes. Nous verrons dans la description de ce programme l'utilité d'une telle fonction.
+
+De manière générale (vous devrez être plus subtils si vous voulez que vos programmes soient efficaces!), la boucle principale de vos programmes ressemblera donc à :
+
+```
+while(1){
+  attenteLecteur();     // On attend qu'une trame soit prête dans la zone mémoire partagée dont nous sommes le _lecteur_
+  
+  // Traiter la trame courante (type de traitement spécifique à chaque programme, par exemple redimensionner, filtrer, etc.)
+  
+  signalLecteur();      // On signale au processus qui vient avant nous dans la chaîne de traitement qu'il peut écrire une nouvelle trame
+  
+  attenteEcrivain();    // On attend que la zone mémoire partagée dont nous sommes _l'écrivain_ soit prête
+  
+  // Écrire les données dans la zone mémoire partagée
+  
+  signalEcrivain();     // On signale au processus qui vient après nous dans la chaîne de traitement qu'il peut lire une nouvelle trame
+}
+```
+
+#### 4.2.2. Algorithme d'initialisation
+
+L'initialisation de la synchronisation est complexifiée par le fait que les processus sont lancés indépendemment. Il est donc tout à fait possible qu'un lecteur soit démarré avant son écrivain correspondant, par exemple. Par ailleurs, un lecteur ne peut connaître les informations sur la vidéo entrante (taille, nombre de canaux, etc.) que lorsque l'écrivain a initialisé la zone mémoire partagée. Il faut donc un algorithme d'initialisation robuste. Voici ce que nous vous suggérons :
+
+Pour l'initialisation de la portion _ecrivain_ (dans `initMemoirePartageeEcrivain`), nous allons :
+1. Créer et ouvrir le fichier virtuel de mémoire partagée en utilisant `shm_open`
+2. Agrandir ce fichier à la bonne taille (la taille de l'en-tête vu plus haut + la taille d'une trame) avec `ftruncate`
+3. Utiliser `mmap` pour que l'on puisse accéder à ce fichier via un pointeur et configurer le fait qu'il s'agit d'une mémoire partagée entre deux processus
+4. Initialiser le mutex et les _deux_ conditions, en prenant soin de leur donner les attributs leur permettant d'être partagés entre processus et de gérer l'inversion de priorité
+5. Faire passer la variable `etat` à la valeur `ETAT_PRET_SANS_DONNEES` pour indiquer que l'initialisation est terminée
+
+Du côté _lecteur_ (dans `initMemoirePartageeLecteur`), nous allons :
+
+
+
+
+Dans notre cas, il nous permet de bloquer le lecteur tant que l'écrivain n'a pas écrit une trame complète et de bloquer l'écrivain tant que le lecteur n'a pas copié l'entièreté de la trame. Vous êtes libres de concevoir votre propre algorithme de synchronisation adapté à ce problème, mais nous vous fournissons une approche fonctionnelle que vous pouvez utiliser. Celle-ci est illustrée à la figure suivante.
 <img src="img/diag_sync.png" style="width:1000px"/>
 
 Dans ce diagramme, l'axe temporel va de haut en bas. On peut distinguer trois sections distinctes : l'initialisation, l'écriture d'une trame vidéo et la lecture d'une trame. Celles-ci sont détaillées dans le texte qui suit.
@@ -142,7 +208,7 @@ Le décodeur est responsable de la lecture d'un fichier vidéo. Son premier argu
 
 Tout fichier ULV commence donc par 4 octets qui correspondent aux lettres S, E, T et R en ASCII. Cela permet au programme de s'assurer que le fichier qu'il tente de lire est du bon format. Par la suite, 4 octets sont utilisés pour indiquer la largeur des images du vidéo, puis 4 octets pour leur hauteur et 4 octets pour le nombre de canaux. Finalement, 4 octets permettent d'indiquer le nombre d'images par seconde du vidéo (usuellement 30, mais ce nombre peut varier). Les trames du vidéo sont par la suite enregistrées une par une. Pour chaque trame, un entier non signé de 32 bits indique la taille, suivi d'un tableau d'octets. Ce tableau *ne contient pas directement l'image, mais son encodage JPEG*. Vous devez donc *décompresser* l'image, nous vous fournissons une fonction le faisant pour vous dans le fichier *jpgd.h* (voyez la fonction `decompress_jpeg_image_from_memory` dans le fichier d'en-tête et les explications que nous y avons ajoutées). Les images sont ainsi encodées à la suite, jusqu'à la dernière qui est suivie d'un entier de 4 octets contenant 0. Cette valeur n'étant pas une taille valide pour une image, vous savez alors que vous avez atteint la fin du fichier. *Vous devez alors recommencer la lecture au début du fichier, en boucle.*
 
-Afin de vous permettre d'expérimenter avec d'autres vidéos et de voir le résultat attendu, nous vous fournissons deux scripts Python, disponible sur [le dépôt Git](https://github.com/setr-ulaval/labo3-h25), capables de convertir (videoConverter.py) et de lire (videoReader.py) les vidéos au format ULV. Ceux-ci requièrent scipy et OpenCV pour fonctionner. Notez que vous n'êtes pas forcés de les utiliser et qu'aucune fonctionnalité du laboratoire ne dépend du bon fonctionnement de ces scripts, qui vous sont fournis à titre d'exemple uniquement.
+Afin de vous permettre d'expérimenter avec d'autres vidéos et de voir le résultat attendu, nous vous fournissons deux scripts Python, disponible sur [le dépôt Git](https://github.com/setr-ulaval/labo3-h26), capables de convertir (videoConverter.py) et de lire (videoReader.py) les vidéos au format ULV. Ceux-ci requièrent scipy et OpenCV pour fonctionner. Notez que vous n'êtes pas forcés de les utiliser et qu'aucune fonctionnalité du laboratoire ne dépend du bon fonctionnement de ces scripts, qui vous sont fournis à titre d'exemple uniquement.
 
 **Note importante :** l'affichage du Raspberry Pi Zero gère les images en mode BGR et non RGB (les canaux rouge et bleu sont inversés). Par conséquent, le format ULV enregistre ces images en inversant les canaux rouge et bleu. Les scripts fournis tiennent compte de cette inversion et restituent l'image en réinversant les canaux, mais ne soyez pas surpris par cette inversion de canal si vous essayez d'afficher une trame par vous-mêmes.
 
@@ -394,39 +460,41 @@ Vous ne serez pas évalués sur l'atteinte précise de ces performances. Toutefo
 
 ## 9. Modalités d'évaluation
 
-Ce travail doit être réalisé **en équipe de deux**, la charge de travail étant à répartir équitablement entre les deux membres de l'équipe. Aucun rapport n'est à remettre, mais vous devez soumettre votre code source **et les graphes de profilage correspondant à tous les scénarios** dans monPortail avant le **27 février 2025, 17h00**. Ensuite, lors de la séance de laboratoire du **28 février 2025**, les deux équipiers doivent être en mesure individuellement d'expliquer leur approche, de comprendre les graphes de profilage qu'ils ont produits et de démontrer le bon fonctionnement de l'ensemble de la solution de l'équipe du laboratoire. Si vous ne pouvez pas vous y présenter, contactez l'équipe pédagogique du cours dans les plus brefs délais afin de convenir d'une date d'évaluation alternative. Ce travail compte pour **15%** de la note totale du cours. Comme pour les travaux précédents, votre code doit compiler **sans avertissements** de la part de GCC.
+Ce travail doit être réalisé **en équipe de deux**, la charge de travail étant à répartir équitablement entre les deux membres de l'équipe. Aucun rapport n'est à remettre, mais vous devez soumettre votre code source **et les graphes de profilage correspondant à tous les scénarios** dans monPortail avant le **25 février 2026, 23h59**. Ensuite, lors de la séance de laboratoire du **27 février 2026, 9h30**, les **deux** équipiers doivent être présents pour l'évaluation individuelle de 30 minutes. Si vous ne pouvez pas vous y présenter, contactez l'équipe pédagogique du cours dans les plus brefs délais afin de convenir d'une date d'évaluation alternative. Ce travail compte pour **15%** de la note totale du cours.
 
 Notre évaluation se fera sur le Raspberry Pi de l'enseignant ou de l'assistant et comprendra notamment les éléments suivants:
-  1. La sortie de compilation d'un `CMake: Clean Rebuild`;
+  1. La sortie de compilation d'un `CMake: Clean Rebuild` et validation de l'absence d'erreurs ou d'avertissements de la part de GCC;
   2. L'exécution des scripts 01, 02, 04, 08, 09 et 11 (fournis dans le dossier _configs_). Nous observerons également le contenu de _stats.txt_ entre chaque exécution.
   3. Dans le cas des configurations 09 et 11, nous validerons également que les changements d'ordonnanceur requis ont bien été effectués, par exemple en lançant la commande `htop` dans un autre terminal et en validant que les programmes ont une valeur de priorité conforme.
   4. Notez qu'il est possible que nous exécutions d'autres configurations : aucune des configurations fournies ne devrait faire planter vos programmes.
-  5. Une discussion sur les résultats que vous obtenez pour ces diverses configurations, sur les graphes que vous avez remis et sur votre implémentation.
  
  
 ### 9.1. Barème d'évaluation
 
 Le barême d'évaluation détaillé sera le suivant (laboratoire noté sur 20 points) :
 
-#### 9.1.1. Qualité du code remis (6 points)
+#### 9.1.1. Qualité du code remis (8 points)
 
-* (3 pts) Le code C est valide, complet et ne contient pas d'erreurs empêchant le bon déroulement des programmes.
+* (5 pts) Le code C est valide, complet et ne contient pas d'erreurs empêchant le bon déroulement des programmes.
 * (1 pts) Tous les programmes compilent sans avertissement (*warning*) de la part du compilateur.
 * (2 pts) Les programmes respectent les contraintes des programmes temps réel (pas d'allocation mémoire dynamique dans la section critique, pas d'entrée/sortie autrement que pour les fichiers de log, etc.)
 
-#### 9.1.2. Validité de la solution (9 points)
+#### 9.1.2. Validité de la solution (12 points)
 
 > **Attention** : un programme ne compilant pas obtient automatiquement une note de **zéro** pour cette section.
 
-* (2 pts) Les programmes sont en mesure d'utiliser des espaces mémoire partagés pour communiquer entre eux.
+* (3 pts) Les programmes sont en mesure d'utiliser des espaces mémoire partagés pour communiquer entre eux.
 * (2 pts) La synchronisation entre les programmes est adéquate et fonctionnelle (c.-à-d. pas d'images coupées ou d'autres problèmes visuels).
-* (3 pts) Le système complet est en mesure d'afficher une ou plusieurs vidéos sur l'écran de manière fluide et de chaîner les traitements effectués sur ces vidéos. Le nombre d'images par seconde est (le cas échéant) limité pour ne pas dépasser la valeur fournie dans le fichier vidéo.
-* (2 pts) Les fonctions de l'ordonnanceur sont correctement utilisées pour sélectionner différents modes d'ordonnancement.
+* (4 pts) Le système complet est en mesure d'afficher une ou plusieurs vidéos sur l'écran de manière fluide et de chaîner les traitements effectués sur ces vidéos. Le nombre d'images par seconde est (le cas échéant) limité pour ne pas dépasser la valeur fournie dans le fichier vidéo.
+* (3 pts) Les fonctions de l'ordonnanceur sont correctement utilisées pour sélectionner différents modes d'ordonnancement.
 
-#### 9.1.3. Justesse des explications et réponses aux questions (5 points)
+#### 9.1.3. Évaluation individuelle
 
-* (5 pts) Les étudiants sont en mesure d'expliquer l'approche utilisée et de répondre aux questions concernant leur code et la théorie liée au laboratoire. Les étudiants expliquent également correctement l'impact des différents modes d'ordonnancement et des différentes options d'exécution possibles. Les étudiants sont capables d'analyser le comportement de leurs programmes grâce aux figures de profilage et à expliquer leur contenu.
+Une évaluation individuelle écrite portant sur le laboratoire sera tenue, *en personne*, à la séance d'atelier du 27 février 2026, à 9h30. La note obtenue à cette évaluation deviendra un facteur multiplicatif appliqué individuellement sur la note d'équipe. Par exemple, une note de 75% à l'évaluation individuelle combinée à une note de 90% pour le code remis résultera en une note de 0.75*0.90 = 67.5%. Une absence non-motivée à cette évaluation entraîne une note (et donc un facteur multiplicatif) de 0.
 
+#### 9.1.4. Questionnaire sur l'utilisation de l'IA
+
+Votre remise _doit_ inclure le fichier `UTILISATION_IA.txt` dûment complété. Les réponses ne sont pas évaluées en tant que telles, mais ne pas remettre ce fichier (ou le remettre dans son état initial, sans modifications et réponses aux questions) entraîne une pénalité automatique de 10% sur la note d'équipe.
 
 
 
