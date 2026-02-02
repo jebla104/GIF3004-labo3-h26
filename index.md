@@ -117,7 +117,7 @@ while(1){
 
 > Remarque : `attenteLecteur` et `signalLecteur` agissent sur une zone mémoire partagée _différente_ de `attenteEcrivain` et `signalEcrivain` ici! Les fonctions Lecteur synchronisent la zone mémoire partagée contenant les données _d'entrée_ du programme alors que les fonctions Ecrivain synchronisent la zone mémoire partagée de _sortie_.
 
-> Remarque : il manque une étape dans la boucle montrée plus haut, à savoir "faire quelque chose avec les données pour transformer les données d'entrée en données de sortie". À vous de trouver le meilleur endroit où insérer cette étape!
+> Remarque : il manque une étape dans la boucle montrée plus haut, à savoir "faire quelque chose avec les données d'entrée pour les transformer en données de sortie". À vous de trouver le meilleur endroit où insérer cette étape!
 
 #### 4.2.2. Algorithme d'initialisation
 
@@ -189,6 +189,8 @@ Si l'ordonnancement demandé n'est pas *NORT*, vous devez utiliser `sched_setatt
 > **Attention** : validez que le changement d'ordonnanceur s'effectue avec succès en vérifiant que la valeur de retour de `sched_setattr()` est bien 0. Toute autre valeur indique une erreur que vous pouvez déterminer en affichant le retour de la fonction `strerror(errno)`.
 
 > Remarque : dans le cas de `RR` et `FIFO`, vous devez également donner une "priorité realtime". Utilisez systématiquement 99.
+
+> Remarque : l'inclusion de `sched_setattr()` et ``sched_getattr()` dans la libc est récente (janvier 2025), aussi certaines pages de manuel affichent encore la vieille interface requérant l'usage de `syscall`. Leurs prototypes sont respectivement `int sched_setattr (pid_t tid, struct sched_attr *attr, unsigned int flags)` et `int sched_getattr (pid_t tid, struct sched_attr *attr, unsigned int size, unsigned int flags)`. Le reste de la documentation est correct.
 
 ## 5. Modules à implémenter
 

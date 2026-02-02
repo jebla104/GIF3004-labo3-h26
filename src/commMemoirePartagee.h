@@ -75,19 +75,29 @@ int initMemoirePartageeLecteur(const char* identifiant,
 // Reçoit un pointeur vers une structure memPartage _vide_.
 // Cette fonction doit _remplir_ cette structure avec les informations nécessaires
 // une fois la mémoire partagée initialisée.
+// Reçoit également un pointeur vers une struct videoInfos initialisée avec les valeurs
+// correctes pour cette exécution (la bonne largeur et hauteur de l'image, etc.).
+// Cette fonction doit initialiser la zone mémoire avec les valeurs correspondantes
+// (par exemple, la taille des données correspond au nombre d'octets requis pour contenir
+// UNE image, qui peut être déduit à partir des valeurs contenues dans la struct videoInfos).
 int initMemoirePartageeEcrivain(const char* identifiant,
                                 struct memPartage *zone,
-                                size_t taille,
-                                struct memPartageHeader* headerInfos);
+                                struct videoInfos *infos);
 
 // Appelée par le lecteur pour se mettre en attente de données sur la zone mémoire partagée
+// Lorsque cette fonction retourne, le mutex devrait être verrouillé par le processus en cours!
 int attenteLecteur(struct memPartage *zone);
 
 // Fonction spéciale similaire à attenteLecteur, mais asynchrone : cette fonction ne bloque jamais.
 // Cela est utile pour le compositeur, qui ne doit pas bloquer l'entièreté des flux si un seul est plus lent.
+// Utilisez la valeur de retour pour permettre à l'appelant de déterminer si la zone mémoire partagée
+// est prête ou non à être lue.
+// Lorsque cette fonction retourne une valeur indiquant que la lecture est possible, le mutex devrait être 
+// verrouillé par le processus en cours!
 int attenteLecteurAsync(struct memPartage *zone);
 
 // Appelée par l'écrivain pour se mettre en attente de la lecture du résultat précédent par un lecteur
+// Lorsque cette fonction retourne, le mutex devrait être verrouillé par le processus en cours!
 int attenteEcrivain(struct memPartage *zone);
 
 // Appelée par le lecteur pour signaler qu'il a fini de lire (réveille l'écrivain correspondant)
