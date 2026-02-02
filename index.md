@@ -56,8 +56,8 @@ Un espace mémoire partagé peut être créé en utilisant la fonction `shm_open
 ```
 struct memPartageHeader{
     pthread_mutex_t mutex;          // Mutex pour protéger les conditions
-    pthread_cond_t condWriter;      // Condition sur laquelle le writer attend
-    pthread_cond_t condReader;      // Condition sur laquelle le reader attend
+    pthread_cond_t condWriter;      // Condition sur laquelle l'écrivain attend
+    pthread_cond_t condReader;      // Condition sur laquelle le lecteur attend
     volatile uint32_t etat;         // État de synchronisation (voir constantes ETAT_*)
     struct videoInfos infos;        // Informations sur la vidéo
 };
@@ -79,7 +79,7 @@ La variable `etat` permet de savoir l'état actuel de la zone mémoire partagée
 #define ETAT_PRET_AVEC_DONNEES 2
 ```
 
-Si on met de côté `ETAT_NON_INITIALISE` pour le moment, on peut voir qu'il y a deux états possibles : *avec* ou *sans* données. Cela nous permet donc de synchroniser les processus lecteur et écrivain. L'écrivain n'écrit _que_ dans l'état `ETAT_PRET_SANS_DONNEES` (et change l'état pour `ETAT_PRET_AVEC_DONNEES` lorsqu'il a terminé) alors que le lecteur ne lit _que_ dans l'état `ETAT_PRET_AVEC_DONNEES` (et change l'état pour `ETAT_PRET_SANS_DONNEES` lorsqu'il a terminé). Toutefois, utiliser seulement une variable comme celle-ci n'est pas suffisant pour assurer une bonne synchronisation. En particulier, nous ne voulons pas effectuer une attente _active_ (où un processus testerait en permanance la valeur de `etat` pour détecter un changement), car cela consommerait énormément de cycles processeur inutilement. De même, simplement mettre en pause le processus (par exemple avec la fonction POSIX `usleep`) ne résoud pas le problème : un trop long délai (ex. 100 ms) peut créer une latence nuisible si les données sont finalement disponibles après une fraction de ce délai (ex. 1 ms, ce qui fait que le processus "dort" pendant 99 ms alors qu'il a du travail à faire), alors qu'un trop court délai revient au problème de l'attente active. Nous voulons une solution où un processus se "réveille" _dès_ qu'il a du travail à faire et se met en pause _dès_ qu'il est terminé.
+Si on met de côté `ETAT_NON_INITIALISE` pour le moment, on peut voir qu'il y a deux états possibles : *avec* ou *sans* données. Cela nous permet donc de synchroniser les processus lecteur et écrivain. L'écrivain n'écrit _que_ lorsque l'état est `ETAT_PRET_SANS_DONNEES` (et change l'état pour `ETAT_PRET_AVEC_DONNEES` lorsqu'il a terminé) alors que le lecteur ne lit _que_ lorsque l'état est `ETAT_PRET_AVEC_DONNEES` (et change l'état pour `ETAT_PRET_SANS_DONNEES` lorsqu'il a terminé). Toutefois, utiliser seulement une variable comme celle-ci n'est pas suffisant pour assurer une bonne synchronisation. En particulier, nous ne voulons pas effectuer une attente _active_ (où un processus testerait en permanance la valeur de `etat` pour détecter un changement), car cela consommerait énormément de cycles processeur inutilement. De même, simplement mettre en pause le processus (par exemple avec la fonction POSIX `usleep`) ne résoud pas le problème : un trop long délai (ex. 100 ms) peut créer une latence nuisible si les données sont finalement disponibles après une fraction de ce délai (ex. 1 ms, ce qui fait que le processus "dort" pendant 99 ms alors qu'il a du travail à faire), alors qu'un trop court délai revient au problème de l'attente active. Nous voulons une solution où un processus se "réveille" _dès_ qu'il a du travail à faire et se met en pause _dès_ qu'il est terminé.
 
 Pour ce faire, nous allons utiliser les conditions POSIX. Celles-ci peuvent être référencées par un objet de type `pthread_cond_t`, qui peut être partagé entre processus. Pour fonctionner, la condition a également besoin d'un mutex (référencé par un objet de type `pthread_mutex_t`). Nous allons utiliser deux conditions : une pour signaler au _lecteur_ que l'écrivain a terminé le traitement d'une trame et que celle-ci est présente dans la zone mémoire partagée et l'autre pour signaler à _l'écrivain_ que le lecteur a terminé la lecture de la trame présentement dans la zone mémoire partagée et que l'écrivain peut donc commencer à en écrire une nouvelle. Ces deux conditions étant mutuellement exclusives, le même mutex peut être utilisé pour protéger les deux.
 
@@ -115,6 +115,9 @@ while(1){
 }
 ```
 
+> Remarque : `attenteLecteur` et `signalLecteur` agissent sur une zone mémoire partagée _différente_ de `attenteEcrivain` et `signalEcrivain` ici! Les fonctions Lecteur synchronisent la zone mémoire partagée contenant les données _d'entrée_ du programme alors que les fonctions Ecrivain synchronisent la zone mémoire partagée de _sortie_.
+
+> Remarque : il manque une étape dans la boucle montrée plus haut, à savoir "faire quelque chose avec les données pour transformer les données d'entrée en données de sortie". À vous de trouver le meilleur endroit où insérer cette étape!
 
 #### 4.2.2. Algorithme d'initialisation
 
@@ -129,14 +132,15 @@ Pour l'initialisation de la portion _ecrivain_ (dans `initMemoirePartageeEcrivai
 
 Du côté _lecteur_ (dans `initMemoirePartageeLecteur`), nous allons :
 1. Tenter d'ouvrir le fichier virtuel de mémoire partagée; s'il n'existe pas, `shm_open` retournera une erreur, mais `initMemoirePartageeLecteur` pourra observer `errno` pour connaître le _type_ d'erreur. S'il s'agit de `ENOENT` (fichier inexistant), il suffit d'attendre un peu avec `usleep` (nous vous fournissons, dans `commMemoirePartagee.h`, la constante `DELAI_INIT_READER_USEC` pour vous suggérer le délai possible) puis de réessayer.
-2. Vérifier sa taille avec `fstat` et valider qu'elle est au moins supérieure à celle de la `struct memPartageHeader`. Si ce n'est pas le cas, là encore on attend jusqu'à ce que la condition soit remplie.
+2. Vérifier sa taille avec `fstat` et valider qu'elle est au moins supérieure à celle de la `struct memPartageHeader`. Si ce n'est pas le cas, là encore on attend en boucle (avec `usleep`) jusqu'à ce que la condition soit remplie.
 3. Utiliser `mmap` pour pouvoir accéder à ce fichier via un pointeur
 4. Attendre que la variable `etat` soit différente de `ETAT_NON_INITIALISE`, ce qui signale que l'écrivain a terminé l'initialisation de la zone mémoire et est prêt à commencer.
 
+> Remarque : utiliser inconditionnellement `usleep` est une mauvaise idée _dans la section critique d'un programme temps réel_. À l'étape de l'initialisation, où les contraintes temps réel ne sont pas présentes, il n'y a pas de problème à le faire.
 
 #### 4.2.3. Libération du processeur
 
-Un processus temps réel ne peut **pas** être interrompu par le noyau (sauf cas spécifiques, selon l'ordonnanceur utilisé). Par conséquent, lorsque votre processus ne peut s'exécuter, vous *devez* redonner la main aux autres processus. Cela peut être fait de trois manières. Premièrement, en utilisant un appel système qui permet explicitement à l'ordonnanceur de vous interrompre (l'attente sur un mutex ou une condition fait par exemple partie de ces opérations). Deuxièmement, en appelant la fonction `sched_yield` pour indiquer que vous acceptez volontairement de laisser le CPU à d'autres processus en attente d'exécution, s'il y en a. Troisièment, en vous mettant volontairement en sommeil en utilisant `usleep`. La différence entre ces deux dernières approches est que `sched_yield` n'est qu'une **indication** donnée au noyau, qui peut très bien vous réveiller immédiatement sans passer à main à un autre processus s'il considère que vous êtes toujours le processus le plus prioritaire, alors que `usleep` force le noyau à ne pas vous réveiller pour la durée approximative que vous avez spécifiée, même si vous auriez finalement avantage à l'être (par exemple, pour traiter une nouvelle trame prête). En d'autres termes, n'utilisez `sched_yield` que dans les cas où vous _pouvez_ laisser la main mais que vous auriez tout de même du travail à faire, et `usleep` lorsque vous n'avez rien à faire pour une période de temps approximativement connue (par exemple le temps avant la prochaine trame du vidéo).
+Un processus temps réel ne peut **pas** être interrompu par le noyau (sauf cas spécifiques, selon l'ordonnanceur utilisé). Par conséquent, lorsque votre processus ne peut s'exécuter, vous *devez* redonner la main aux autres processus. Cela peut être fait de trois manières. Premièrement, en utilisant un appel système qui permet explicitement à l'ordonnanceur de vous interrompre (l'attente sur un mutex ou une condition fait par exemple partie de ces opérations). Deuxièmement, en appelant la fonction `sched_yield` pour indiquer que vous acceptez volontairement de laisser le CPU à d'autres processus en attente d'exécution, s'il y en a. Troisièment, en vous mettant volontairement en sommeil en utilisant `usleep`. La différence entre ces deux dernières approches est que `sched_yield` n'est qu'une **indication** donnée au noyau, qui peut très bien vous réveiller immédiatement sans passer à main à un autre processus s'il considère que vous êtes toujours le processus le plus prioritaire, alors que `usleep` force le noyau à ne pas vous réveiller pour la durée approximative que vous avez spécifiée, même si vous auriez finalement avantage à l'être (par exemple, pour traiter une nouvelle trame prête). En d'autres termes, n'utilisez `sched_yield` que dans les cas où vous _pouvez_ laisser la main mais que vous auriez tout de même du travail à faire, et `usleep` lorsque vous _savez_ que vous n'aurez rien à faire pour une période de temps approximativement connue (par exemple le temps avant la prochaine trame du vidéo).
 
 
 ### 4.3. Gestion de la mémoire
@@ -159,9 +163,9 @@ Tous les programmes possèdent une interface ligne de commandes similaire, soit 
 
 *flux_entree* et *flux_sortie* constituent respectivement les identifiants des zones mémoire partagées en entrée et en sortie. Les options sont quant à elles différentes selon les programmes. Parmi celles *devant être disponibles pour tous les programmes*, nous retrouvons :
 
-* "-s" qui détermine le type d'ordonnancement voulu. Il peut prendre la valeur *NORT* (ordonnancement normal), *RR* (ordonnancement temps réel avec préemption), *FIFO* (ordonnancement temps réel sans préemption) ou *DEADLINE* (ordonnancement de type plus proche échéance). Toute autre valeur est invalide. Par défaut, la valeur est "NORT". Dans le cas de *NORT*, vous n'avez aucune opération à faire, puisque cette option correspond au mode par défaut de l'ordonnanceur. Dans les autres cas, vous devez changer le mode de l'ordonnanceur (voir la section 4.5).
+* "-s" qui détermine le type d'ordonnancement voulu. Il peut prendre la valeur *NORT* (ordonnancement normal), *RR* (ordonnancement temps réel avec préemption), *FIFO* (ordonnancement temps réel sans préemption) ou *DEADLINE* (ordonnancement de type plus proche échéance). Toute autre valeur est invalide. Par défaut, la valeur est "NORT". Dans le cas de *NORT*, vous n'avez aucune opération à faire, puisque cette option correspond au mode par défaut de l'ordonnanceur. Dans les autres cas, vous devez changer le mode de l'ordonnanceur (voir la section 4.5). La fonction `parseSchedOption`, implémentée dans `utils.c`, vous permet de décoder la valeur passée sur la ligne de commande.
 
-* "-d" qui, dans le cas de l'ordonnanceur *DEADLINE*, permet de fournir les valeurs en millisecondes pour runtime, deadline et period, respectivement, séparés par des virgules. Par exemple, `-d 10,20,25` indique un runtime de 10 ms, un deadline de 20 ms et une période de 25 ms. Si l'ordonnanceur n'est pas de type *DEADLINE* (autrement dit, l'option -s ne contient pas DEADLINE), alors vous pouvez ignorer ces valeurs qui n'auront pas d'effet.
+* "-d" qui, dans le cas de l'ordonnanceur *DEADLINE*, permet de fournir les valeurs *en millisecondes* pour runtime, deadline et period, respectivement, séparés par des virgules. Par exemple, `-d 10,20,25` indique un runtime de 10 ms, un deadline de 20 ms et une période de 25 ms. Si l'ordonnanceur n'est pas de type *DEADLINE* (autrement dit, l'option -s ne contient pas DEADLINE), alors vous pouvez ignorer ces valeurs qui n'auront pas d'effet. La fonction `parseDeadlineParams`, implémentée dans `utils.c`, vous permet de décoder ces valeurs et de les stocker dans une struct permettant un accès facile à chaque valeur.
 
 Dans tous les cas, **vous pouvez assumer que les arguments donnés à vos programmes seront toujours valides** : vous n'avez pas à effectuer de vérification à cet effet. Toutefois, l'ordre des options n'est pas garanti (celui des flux_entree / flux_sortie l'est quant à lui). Nous vous recommandons fortement d'utiliser une librairie comme getopt pour vous aider dans l'analyse des arguments. 
 
@@ -177,11 +181,14 @@ Dans ce mode, vous devez attribuer des valeurs aux différents paramètres. Vous
 
 ### 4.5. Changement de mode du scheduler
 
+Pour changement le mode d'ordonnancement, vous devez appeler la fonction `appliquerOrdonnancement`, déclarée dans `utils.h`. **Vous devez implémenter vous-mêmes cette fonction dans `utils.c`**.
 Si l'ordonnancement demandé n'est pas *NORT*, vous devez utiliser `sched_setattr` avec une `struct sched_attr` (définis dans les en-têtes standards `sched.c` et `linux/sched.c`) pour choisir le mode d'ordonnancement demandé. Notez que les modes temps réel nécessitent les droits d'administrateur pour pouvoir être utilisés, vous devez donc lancer votre programme avec *sudo* (c'est déjà fait dans les scripts de lancement). Voyez [la page de manuel de sched_setattr](https://man7.org/linux/man-pages/man2/sched_setattr.2.html) et [une description plus complète du mode deadline](https://man7.org/linux/man-pages/man7/sched.7.html) pour vous aider à comprendre comment faire ce changement d'ordonnanceur. C'est aussi cette dernière page qui décrit ce que signifient _runtime_, _deadline_ et _period_.
 
 > **Attention** : initialisez toutes les valeurs de la structure `sched_attr` à 0, même celles que vous n'utilisez pas! Par ailleurs, portez attention à _l'unité_ des champs deadline, runtime et period.
 
 > **Attention** : validez que le changement d'ordonnanceur s'effectue avec succès en vérifiant que la valeur de retour de `sched_setattr()` est bien 0. Toute autre valeur indique une erreur que vous pouvez déterminer en affichant le retour de la fonction `strerror(errno)`.
+
+> Remarque : dans le cas de `RR` et `FIFO`, vous devez également donner une "priorité realtime". Utilisez systématiquement 99.
 
 ## 5. Modules à implémenter
 
@@ -343,7 +350,7 @@ Nous vous conseillons de développer vos programmes dans cet ordre:
 
 1. Implémentez `allocateurMemoire`, mais en utilisant, de manière temporaire, directement `malloc()` et `free()` (c'est-à-dire que `tempsreel_malloc()` ne fait que retourner le résultat de `malloc()` sans rien faire d'autre). Ce n'est **pas** ce qui est demandé, mais ça vous permettra de développer vos programmes sans risquer des problèmes dus à un allocateur mémoire défaillant.
 2. Implémentez le `decodeur`. Testez-le en utilisant le `compositeur` fourni. Au besoin, vous pouvez utiliser la fonction `enregistreImage()` dans `utils` pour enregistrer une image au format PPM, que vous pouvez par la suite télécharger sur votre ordinateur et ouvrir avec un lecteur d'image standard.
-3. Implémentez le `convertisseurgris`. Son implémentation est très simple (il suffit d'appeler `convertToGray()`), mais pour que cela fonctionne, vous devrez également implémenter `commMemoirePartagee`. Finalement, vous devrez écrire le code permettant à `convertisseurgris` de lire sur ce même espace mémoire partagé. Utilisez encore une fois `enregistreImage()` et/ou les programmes solution fournis pour valider que le code de `convertisseurgris` fonctionne correctement.
+3. Implémentez le `convertisseurgris`. Son implémentation est très simple (il suffit d'appeler `convertToGray()`, dans `utils.h`), mais pour que cela fonctionne, vous devrez également implémenter `commMemoirePartagee`. Finalement, vous devrez écrire le code permettant à `convertisseurgris` de lire sur ce même espace mémoire partagé. Utilisez encore une fois `enregistreImage()` et/ou les programmes solution fournis pour valider que le code de `convertisseurgris` fonctionne correctement.
 4. Implémentez le `compositeur`. Son code de lecture sur l'espace mémoire partagé sera très similaire à celui de `convertisseurgris`, à la différence près que `compositeur` ne doit pas bloquer si une source n'est pas disponible, car il doit gérer jusqu'à 4 sources en parallèle! Assurez-vous que vous êtes capables _d'afficher_ une vidéo (vous pouvez utiliser la configuration 01_sourceUnique pour vous tester) à une vitesse correcte (on ne doit pas dépasser le nombre d'images par seconde identifié dans le fichier ULV!). Vérifiez également que vous êtes capables de produire le fichier `stats.txt` tel que demandé à la section 5.2.1.
 5. Implémentez le `redimensionneur` et le `filtreur`. Leur code devrait être très similaire à celui de `convertisseurgris`, à l'exception de l'analyse des arguments sur la ligne de commande et de la fonction de traitement à lancer. À ce stade, vous devriez être capables d'exécuter les configurations 01 à 08 sans erreur.
 6. Remplacez l'implémentation factice d'`allocateurMemoire` par une implémentation valide telle que décrite à la section 4.3. Tous vos programmes devraient également utiliser `tempsreel_malloc()` / `tempsreel_free()` à l'intérieur de leur boucle critique, jamais `malloc()` et `free()`. Revalidez les configurations 01 à 08 pour confirmer que votre allocateur fonctionne correctement.
@@ -441,19 +448,19 @@ Le tableau suivant récapitule le nombre d'images par seconde obtenu par notre s
 
 | Configuration  | Source 1  | Source 2  | Source 3  | Source 4  |
 |---|---|---|---|---|
-| 01  | 28.6 / 39.8  | N/A  | N/A  | N/A  |
-| 02  | 24.7 / 60.2  |  24.8 / 61.5 | N/A  | N/A  |
-| 03  | 20.2 / 117.8  | 20.3 / 131.2  | 20.5 / 110.0  | N/A  |
-| 04  | 15.1 / 151.0  | 15.2 / 160.1  | 14.9 / 177.7  | 15.4 / 158.3  |
-| 05  | 6.8 / 203.6  | N/A  | N/A  | N/A  |
-| 06  | 1.5 / 732.8 | 1.5 / 729.0  | 1.5 / 747.6 | N/A  |
-| 07  | 16.4 / 109.9  | 16.5 / 120.8 | N/A | N/A  |
-| 08  | 12.5 / 158.2  | 12.6 / 158.8 | N/A | N/A  |
-| 09  | 16.0 / 116.1  | 0.8 / 2318.9  | 0.7 / 1978.4  | 0.9 / 2124.6  |
-| 10  | 13.4 / 127.2  |  10.7 / 151.1 | N/A  | N/A  |
-| 11  | 19.9 / 79.8  | 6.8 / 256.1  | 16.9 / 166.5 | N/A  |
+| 01  | 27.7 / 39.9  | N/A  | N/A  | N/A  |
+| 02  | 22.9 / 51.5  |  22.8 / 50.6 | N/A  | N/A  |
+| 03  | 20.2 / 56.8  | 20.1 / 58.9  | 20.1 / 59.9  | N/A  |
+| 04  | 16.8 / 118.0  | 16.6 / 124.8  | 16.8 / 113.4  | 16.5 / 103.2  |
+| 05  | 7.3 / 156.8  | N/A  | N/A  | N/A  |
+| 06  | 1.9 / 580.0 | 1.9 / 593.2  | 1.9 / 594.3 | N/A  |
+| 07  | 20.3 / 65.1  | 20.2 / 63.6 | N/A | N/A  |
+| 08  | 17.1 / 72.3  | 17.1 / 69.9 | N/A | N/A  |
+| 09  | 17.3 / 108.9  | 2.4 / 1032.9  | 2.3 / 1046.6  | 2.4 / 1032.0  |
+| 10  | 16.0 / 67.3  |  15.9 / 84.6 | N/A  | N/A  |
+| 11  | 18.4 / 70.0  | 6.8 / 259.1  | 18.4 / 70.4 | N/A  |
 
-Vous ne serez pas évalués sur l'atteinte précise de ces performances. Toutefois, une performance drastiquement inférieure (moins de la moitié de la performance affichée ici, par exemple) pourra être pénalisée car elle implique une implémentation probablement incorrecte au niveau du partage mémoire et/ou de la synchronisation. De manière générale, votre solution devrait afficher de manière fluide (à l'oeil) les configurations `01_sourceUnique` et `02_deuxVideos`. Si votre implémentation est efficace, vous devriez être capable d'avoir aussi une fluidité acceptable pour `03_troisVideos` et, si elle est très efficace, une fluidité minimale (>= 15 fps) pour `04_mosaique`.
+Vous ne serez pas évalués sur l'atteinte précise de ces performances. Toutefois, une performance drastiquement inférieure (moins de la moitié de la performance affichée ici, par exemple) pourra être pénalisée car elle implique une implémentation probablement incorrecte au niveau du partage mémoire et/ou de la synchronisation. De manière générale, votre solution devrait afficher de manière fluide (à l'oeil) les configurations `01_sourceUnique` et `02_deuxVideos`. Si votre implémentation est efficace, vous devriez être capable d'avoir aussi une fluidité acceptable pour `03_troisVideos` et, si elle est très efficace, une fluidité minimale (>= 15 fps) pour `04_mosaique`. Par ailleurs, des sources configurées similairement devraient avoir environ les mêmes performances. Par exemple, dans le scénario 04, on configure 4 décodeurs avec les mêmes paramètres (hormis le fichier ULV) et on les connecte directement au compositeur : les performances (en fps) devraient donc être très similaires, comme dans les mesures du tableau, puisqu'aucune source n'est "avantagée" par rapport à une autre.
 
 ## 9. Modalités d'évaluation
 
