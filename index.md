@@ -190,7 +190,7 @@ Si l'ordonnancement demandé n'est pas *NORT*, vous devez utiliser `sched_setatt
 
 > Remarque : dans le cas de `RR` et `FIFO`, vous devez également donner une "priorité realtime". Utilisez systématiquement 99.
 
-> Remarque : l'inclusion de `sched_setattr()` et ``sched_getattr()` dans la libc est récente (janvier 2025), aussi certaines pages de manuel affichent encore la vieille interface requérant l'usage de `syscall`. Leurs prototypes sont respectivement `int sched_setattr (pid_t tid, struct sched_attr *attr, unsigned int flags)` et `int sched_getattr (pid_t tid, struct sched_attr *attr, unsigned int size, unsigned int flags)`. Le reste de la documentation est correct.
+> Remarque : l'inclusion de `sched_setattr()` et `sched_getattr()` dans la libc est récente (janvier 2025), aussi certaines pages de manuel affichent encore la vieille interface requérant l'usage de `syscall`. Leurs prototypes sont respectivement `int sched_setattr (pid_t tid, struct sched_attr *attr, unsigned int flags)` et `int sched_getattr (pid_t tid, struct sched_attr *attr, unsigned int size, unsigned int flags)`. Le reste de la documentation est correct.
 
 ## 5. Modules à implémenter
 
