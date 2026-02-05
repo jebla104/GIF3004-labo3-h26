@@ -110,7 +110,7 @@ void _permuteRGB(const unsigned int in_height, const unsigned int in_width,
 
 
 void _permuteRGB_char(const unsigned int in_height, const unsigned int in_width,
-                     unsigned char *input_cont, const unsigned int n_channels, const unsigned char *input)
+                    unsigned char *input_cont, const unsigned int n_channels, const unsigned char *input)
 {
     for (unsigned int k = 0; k < n_channels; ++k) {
         for (unsigned int i = 0; i < in_height; ++i) {
@@ -144,6 +144,10 @@ Kernel _createGaussianKernel(const unsigned int height, const unsigned int width
     kern.width = width;
     kern.height = height;
     kern.data = (float*)tempsreel_malloc(width*height*sizeof(float));
+    if(kern.data == NULL){
+        fprintf(stderr, "[_createGaussianKernel] Erreur d'allocation memoire avec tempsreel_malloc pour le kernel gaussien (pointeur nul)\n");
+        exit(EXIT_FAILURE);
+    }
 
     const int max_x = (height - 1) / 2;
     const int min_x = -(height / 2);
@@ -158,26 +162,34 @@ Kernel _createGaussianKernel(const unsigned int height, const unsigned int width
         }
     }
 
-	// Normalize the kernel
+    // Normalize the kernel
     for(unsigned int i = 0; i < height*width; ++i) {
         kern.data[i] /= sum;
-	}
+    }
 
     return kern;
 }
 
 void _destroyKernel(Kernel *kern)
 {
-	tempsreel_free(kern->data);
+    tempsreel_free(kern->data);
 }
 
 /* Filtering */
 
 void lowpassFilter(const unsigned int height, const unsigned int width, const unsigned char *input, unsigned char *output,
-                   const unsigned int kernel_size, float sigma, const unsigned int n_channels)
+                const unsigned int kernel_size, float sigma, const unsigned int n_channels)
 {
     float *input_cont = (float*)tempsreel_malloc(height * width * n_channels * sizeof(float));
+    if(input_cont == NULL){
+        fprintf(stderr, "[lowpassFilter] Erreur d'allocation memoire avec tempsreel_malloc pour input_cont (pointeur nul)\n");
+        exit(EXIT_FAILURE);
+    }
     float *output_cont = (float*)tempsreel_malloc(height * width * n_channels * sizeof(float));
+    if(output_cont == NULL){
+        fprintf(stderr, "[lowpassFilter] Erreur d'allocation memoire avec tempsreel_malloc pour output_cont (pointeur nul)\n");
+        exit(EXIT_FAILURE);
+    }
 
     Kernel kern = _createGaussianKernel(kernel_size, kernel_size, sigma);
 
@@ -195,9 +207,14 @@ void lowpassFilter(const unsigned int height, const unsigned int width, const un
 }
 
 void highpassFilter(const unsigned int height, const unsigned int width, const unsigned char *input, unsigned char *output,
-                   const unsigned int kernel_size, float sigma, const unsigned int n_channels)
+                const unsigned int kernel_size, float sigma, const unsigned int n_channels)
 {
     unsigned char *filtered = (unsigned char*)tempsreel_malloc(height * width * n_channels * sizeof(unsigned char));
+    if(filtered == NULL){
+        fprintf(stderr, "[highpassFilter] Erreur d'allocation memoire avec tempsreel_malloc pour filtered (pointeur nul)\n");
+        exit(EXIT_FAILURE);
+    }
+    
     lowpassFilter(height, width, input, filtered, kernel_size, sigma, n_channels);
 
     for (unsigned int i = 0; i < height * width * n_channels; ++i ) {
@@ -273,8 +290,15 @@ ResizeGrid resizeNearestNeighborInit(const unsigned int out_height, const unsign
     ResizeGrid retval;
     memset(&retval, 0, sizeof(retval));
     retval.i = (unsigned int*)tempsreel_malloc(out_height * out_width * sizeof(unsigned int));
+    if(retval.i == NULL){
+        fprintf(stderr, "[resizeNearestNeighborInit] Erreur d'allocation memoire avec tempsreel_malloc pour retval.i (pointeur nul)\n");
+        exit(EXIT_FAILURE);
+    }
     retval.j = (unsigned int*)tempsreel_malloc(out_height * out_width * sizeof(unsigned int));
-
+    if(retval.j == NULL){
+        fprintf(stderr, "[resizeNearestNeighborInit] Erreur d'allocation memoire avec tempsreel_malloc pour retval.j (pointeur nul)\n");
+        exit(EXIT_FAILURE);
+    }
     _createGrid(out_height, out_width, (float)in_height, (float)in_width, retval.i, retval.j);
 
     return retval;
@@ -286,7 +310,15 @@ ResizeGrid resizeBilinearInit(const unsigned int out_height, const unsigned int 
     ResizeGrid retval;
     memset(&retval, 0, sizeof(retval));
     retval.i_f = (float*)tempsreel_malloc(out_height * out_width * sizeof(float));
+    if(retval.i_f == NULL){
+        fprintf(stderr, "[resizeBilinearInit] Erreur d'allocation memoire avec tempsreel_malloc pour retval.i_f (pointeur nul)\n");
+        exit(EXIT_FAILURE);
+    }
     retval.j_f = (float*)tempsreel_malloc(out_height * out_width * sizeof(float));
+    if(retval.j_f == NULL){
+        fprintf(stderr, "[resizeBilinearInit] Erreur d'allocation memoire avec tempsreel_malloc pour retval.j_f (pointeur nul)\n");
+        exit(EXIT_FAILURE);
+    }
 
     _createGridFloat(out_height, out_width, (float)in_height, (float)in_width, retval.i_f, retval.j_f);
 
@@ -304,12 +336,20 @@ void resizeDestroy(ResizeGrid rg)
 
 
 void resizeNearestNeighbor(const unsigned char* input, const unsigned int in_height, const unsigned int in_width,
-               unsigned char* output, const unsigned int out_height, const unsigned int out_width,
-               const ResizeGrid rg, const unsigned int n_channels)
+            unsigned char* output, const unsigned int out_height, const unsigned int out_width,
+            const ResizeGrid rg, const unsigned int n_channels)
 {
     if (n_channels > 1) {
         unsigned char *input_cont = (unsigned char*)tempsreel_malloc(in_height * in_width * n_channels * sizeof(unsigned char));
+        if(input_cont == NULL){
+            fprintf(stderr, "[resizeNearestNeighborInit] Erreur d'allocation memoire avec tempsreel_malloc pour input_cont (pointeur nul)\n");
+            exit(EXIT_FAILURE);
+        }
         unsigned char *output_cont = (unsigned char*)tempsreel_malloc(out_height * out_width * n_channels * sizeof(unsigned char));
+        if(output_cont == NULL){
+            fprintf(stderr, "[resizeNearestNeighborInit] Erreur d'allocation memoire avec tempsreel_malloc pour output_cont (pointeur nul)\n");
+            exit(EXIT_FAILURE);
+        }
         _permuteRGB_char(in_height, in_width, input_cont, n_channels, input);
         for (unsigned int i = 0; i < n_channels; ++i) {
             _ul_nearestneighbors_regulargrid(input_cont + (in_height*in_width)*i, in_width, rg.i, rg.j, out_height*out_width, output_cont + (out_height*out_width)*i);
@@ -332,12 +372,19 @@ void resizeNearestNeighbor(const unsigned char* input, const unsigned int in_hei
 }
 
 void resizeBilinear(const unsigned char* input, const unsigned int in_height, const unsigned int in_width,
-                     unsigned char* output, const unsigned int out_height, const unsigned int out_width,
-                     const ResizeGrid rg, const unsigned int n_channels)
+                    unsigned char* output, const unsigned int out_height, const unsigned int out_width,
+                    const ResizeGrid rg, const unsigned int n_channels)
 {
     unsigned char *input_cont = (unsigned char*)tempsreel_malloc(in_height * in_width * n_channels * sizeof(unsigned char));
+    if(input_cont == NULL){
+        fprintf(stderr, "[resizeBilinear] Erreur d'allocation memoire avec tempsreel_malloc pour input_cont (pointeur nul)\n");
+        exit(EXIT_FAILURE);
+    }
     unsigned char *output_cont = (unsigned char*)tempsreel_malloc(out_height * out_width * n_channels * sizeof(unsigned char));
-
+    if(output_cont == NULL){
+        fprintf(stderr, "[resizeBilinear] Erreur d'allocation memoire avec tempsreel_malloc pour output_cont (pointeur nul)\n");
+        exit(EXIT_FAILURE);
+    }
     if (n_channels > 1) {
         _permuteRGB_char(in_height, in_width, input_cont, n_channels, input);
         for (unsigned int i = 0; i < n_channels; ++i) {
@@ -430,7 +477,7 @@ void evenementProfilage(InfosProfilage *dataprof, unsigned int type){
     }
 
     // Obtention du temps courant
-	struct timespec temps_courant;
+    struct timespec temps_courant;
     clock_gettime(CLOCK_MONOTONIC, &temps_courant);
     double multiplier = 1000000000.;
     int c;

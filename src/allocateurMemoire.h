@@ -21,6 +21,7 @@ extern "C" {
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <stdlib.h>
 
 /******************************************************************************
  * L'idée de cet allocateur mémoire est de pré-allouer plusieurs blocs de mémoire
