@@ -16,6 +16,6 @@ do
     sleep 0.05
 done
 echo "[Script] /mem1, /mem2 et /mem3 crees, lancement compositeur"
-sudo ./compositeur -s DEADLINE -d 11,33,33 /mem1 /mem2 /mem3 &
+sudo ./compositeur -s DEADLINE -d 9,33,33 /mem1 /mem2 /mem3 &
 wait;
 
