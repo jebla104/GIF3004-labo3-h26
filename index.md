@@ -186,7 +186,7 @@ Si l'ordonnancement demandé n'est pas *NORT*, vous devez utiliser `sched_setatt
 
 > **Attention** : initialisez toutes les valeurs de la structure `sched_attr` à 0, même celles que vous n'utilisez pas! Par ailleurs, portez attention à _l'unité_ des champs deadline, runtime et period.
 
-> **Attention** : validez que le changement d'ordonnanceur s'effectue avec succès en vérifiant que la valeur de retour de `sched_setattr()` est bien 0. Toute autre valeur indique une erreur que vous pouvez déterminer en affichant le retour de la fonction `strerror(errno)`.
+> **Attention** : validez que le changement d'ordonnanceur s'effectue avec succès en vérifiant que la valeur de retour de `sched_setattr()` est bien 0. Toute autre valeur indique une erreur que vous pouvez déterminer en affichant le retour de la fonction `strerror(errno)`. Vous pouvez également valider que le changement s'est effectué avec succès en exécutant la commande `chrt -p PID` où `PID` est l'identifiant de votre processus (la première colonne de htop).
 
 > Remarque : dans le cas de `RR` et `FIFO`, vous devez également donner une "priorité realtime". Utilisez systématiquement 99.
 
@@ -471,7 +471,7 @@ Ce travail doit être réalisé **en équipe de deux**, la charge de travail ét
 Notre évaluation se fera sur le Raspberry Pi de l'enseignant ou de l'assistant et comprendra notamment les éléments suivants:
   1. La sortie de compilation d'un `CMake: Clean Rebuild` et validation de l'absence d'erreurs ou d'avertissements de la part de GCC;
   2. L'exécution des scripts 01, 02, 04, 08, 09 et 11 (fournis dans le dossier _configs_). Nous observerons également le contenu de _stats.txt_ entre chaque exécution.
-  3. Dans le cas des configurations 09 et 11, nous validerons également que les changements d'ordonnanceur requis ont bien été effectués, par exemple en lançant la commande `htop` dans un autre terminal et en validant que les programmes ont une valeur de priorité conforme.
+  3. Dans le cas des configurations 09 et 11, nous validerons également que les changements d'ordonnanceur requis ont bien été effectués, par exemple en lançant les commandes `htop` et `chrt` dans un autre terminal et en validant que les programmes ont une valeur de priorité conforme.
   4. Notez qu'il est possible que nous exécutions d'autres configurations : aucune des configurations fournies ne devrait faire planter vos programmes.
  
  
