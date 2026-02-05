@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-set(CMAKE_TOOLCHAIN_FILE $ENV{HOME}/arm-cross-comp-env-H2026-hf/rpi-zero-w-toolchain.cmake)
+set(CMAKE_TOOLCHAIN_FILE $ENV{HOME}/arm-cross-comp-env/rpi-zero-w-toolchain.cmake)
 project(SETR_TP3)
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
