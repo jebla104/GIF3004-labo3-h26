@@ -12,6 +12,11 @@
 #ifndef COMM_MEM_H
 #define COMM_MEM_H
 
+// Permet de protéger le header lorsqu'il est inclus par un fichier C++
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -107,5 +112,9 @@ void signalLecteur(struct memPartage *zone);
 void signalEcrivain(struct memPartage *zone);
 
 // N'oubliez pas d'implémenter les fonctions décrites ici dans commMemoirePartagee.c!
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

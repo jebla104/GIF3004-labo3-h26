@@ -6,7 +6,9 @@
  * 
  * Fichier implémentant les fonctions utilitaires telles que déclarées dans utils.h
  ******************************************************************************/
-
+// La ligne ci-dessous indique à la libc que nous voulons les extensions supplémentaires
+// permettant, entre autres, l'accès à sched_setattr
+#define _GNU_SOURCE
 #include "utils.h"
 
 #define min(a, b) (((a) < (b)) ? (a) : (b))

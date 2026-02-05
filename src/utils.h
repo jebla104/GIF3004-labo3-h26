@@ -14,6 +14,12 @@
 #ifndef UTILS_H
 #define UTILS_H
 
+
+// Permet de protéger le header lorsqu'il est inclus par un fichier C++
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdio.h>
 #include <math.h>
 #include <string.h>
@@ -22,7 +28,6 @@
 #include <inttypes.h>
 #include <sched.h>
 #include <errno.h>
-#include <linux/sched.h>
 #include "allocateurMemoire.h"
 
 #define ORDONNANCEMENT_NORT 0
@@ -142,5 +147,10 @@ void enregistreImage(const unsigned char* input, const unsigned int in_height, c
 void initProfilage(InfosProfilage *dataprof, const char *chemin_enregistrement);
 
 void evenementProfilage(InfosProfilage *dataprof, unsigned int type);
+
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

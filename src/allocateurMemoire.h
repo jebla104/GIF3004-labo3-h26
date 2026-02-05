@@ -11,6 +11,11 @@
 #ifndef ALLOC_MEM_H
 #define ALLOC_MEM_H
 
+// Permet de protéger le header lorsqu'il est inclus par un fichier C++
+#ifdef __cplusplus
+extern "C" {
+#endif
+    
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -73,5 +78,9 @@ void* tempsreel_malloc(size_t taille);
 void tempsreel_free(void* ptr);
 
 // N'oubliez pas de créer le fichier allocateurMemoire.c et d'y implémenter les fonctions décrites ici!
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
