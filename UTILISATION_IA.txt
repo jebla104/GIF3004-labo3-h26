@@ -1,9 +1,56 @@
 Question 1 : Avez-vous utilisé un ou des outils d'IA pour ce laboratoire, même seulement en partie (oui/non)?
 
+Oui
+
 Répondez aux questions suivantes seulement si vous avez répondu "oui" à la question précédente.
 
 Question 2 : Quels modèles (ex., Claude Opus, Gemini Pro, GPT-Codex, etc.)?
 
+AmazonQ (Claude), GPT-5
+
 Question 3 : Pour la réalisation de quelles tâches en particulier? Donnez un exemple de "prompt" utilisé et de résultat.
 
+Majoritairement pour aider la compréhension de la synchronisation des zones de memoire partagee et de leurs acces. Aider pour deboguer et guider l'implementation de certaines des fonctionnalites, comme l'allocateur memoire temps reel.
+
+Prompt: 
+a quoi pourrait ressembler un allocateur memoire temps reel dans notre situation. quels composants on pourrait retrouver
+
+Resultat:
+Composants d'un allocateur mémoire temps réel
+1. Structure de bloc mémoire
+Chaque bloc doit contenir :
+
+Un indicateur de disponibilité (libre/occupé)
+
+Un pointeur vers la zone de données
+
+Potentiellement la taille du bloc
+
+2. Deux pools de mémoire distincts
+Pool de gros blocs : pour les images (centaines de Ko)
+
+Pool de petits blocs : pour les allocations diverses (< 2 Ko)
+
+3. Structures de données pour gérer les pools
+// Structure pour un bloc individuel
+typedef struct {
+    int libre;           // 1 si libre, 0 si occupé
+    void* data;          // Pointeur vers la mémoire réelle
+    size_t taille;       // Taille du bloc
+} Bloc;
+
+// Variables globales pour gérer les pools
+static Bloc grosBlocs[ALLOC_N_GROS_BLOCS];
+static Bloc petitsBlocs[ALLOC_N_PETITS_BLOCS];
+
+static void* poolGrosBlocs = NULL;    // Mémoire pré-allouée pour gros blocs
+static void* poolPetitsBlocs = NULL;  // Mémoire pré-allouée pour petits blocs
+
+static size_t tailleGrosBloc = 0;     // Taille d'un gros bloc
+
+
 Question 4 : Avez-vous rencontré des problèmes lors de l'utilisation de l'IA (mauvaise compréhension des commandes fournies, résultats erronés, etc.)? Qu'avez-vous fait pour les régler?
+
+Les resultats fournis ne correspondaient pas toujours a ce que je cherchais. Dans le cas des questions de comprehension, fournir plus de contexte a l'IA sur la composante qu'on travaillait et 
+les interactions attendues pouvait aider. Dans le cas d'utilisations de commandes que je ne connaissais pas ou qu'on a pas mentionner dans l'enonce, aller consulter de la documentation sur
+ces commandes m'aidait a comprendre pourquoi l'IA l'avait utiliser. 
