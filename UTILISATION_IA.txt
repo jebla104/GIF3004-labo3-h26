@@ -1,9 +1,62 @@
 Question 1 : Avez-vous utilisé un ou des outils d'IA pour ce laboratoire, même seulement en partie (oui/non)?
 
+Oui
+
 Répondez aux questions suivantes seulement si vous avez répondu "oui" à la question précédente.
 
 Question 2 : Quels modèles (ex., Claude Opus, Gemini Pro, GPT-Codex, etc.)?
 
+- AmazonQ (Claude), GPT-5
+- Gemini pro et Claude Opus 4.6
+
 Question 3 : Pour la réalisation de quelles tâches en particulier? Donnez un exemple de "prompt" utilisé et de résultat.
 
+- Majoritairement pour aider la compréhension de la synchronisation des zones de memoire partagee et de leurs acces. Aider pour deboguer et guider l'implementation de certaines des fonctionnalites, comme l'allocateur memoire temps reel.
+- Principalemen pour la comprehension de sujet, demande de donnees specifiques (sur les methodes d'ordonnancement notamment) et en mode agent pour debuguer (soucis de lag spike tres difficile a trouver)
+
+
+Prompt: 
+a quoi pourrait ressembler un allocateur memoire temps reel dans notre situation. quels composants on pourrait retrouver
+
+Resultat:
+Composants d'un allocateur mémoire temps réel
+1. Structure de bloc mémoire
+Chaque bloc doit contenir :
+
+Un indicateur de disponibilité (libre/occupé)
+
+Un pointeur vers la zone de données
+
+Potentiellement la taille du bloc
+
+2. Deux pools de mémoire distincts
+Pool de gros blocs : pour les images (centaines de Ko)
+
+Pool de petits blocs : pour les allocations diverses (< 2 Ko)
+
+3. Structures de données pour gérer les pools
+// Structure pour un bloc individuel
+typedef struct {
+    int libre;           // 1 si libre, 0 si occupé
+    void* data;          // Pointeur vers la mémoire réelle
+    size_t taille;       // Taille du bloc
+} Bloc;
+
+// Variables globales pour gérer les pools
+static Bloc grosBlocs[ALLOC_N_GROS_BLOCS];
+static Bloc petitsBlocs[ALLOC_N_PETITS_BLOCS];
+
+static void* poolGrosBlocs = NULL;    // Mémoire pré-allouée pour gros blocs
+static void* poolPetitsBlocs = NULL;  // Mémoire pré-allouée pour petits blocs
+
+static size_t tailleGrosBloc = 0;     // Taille d'un gros bloc
+
+
+----------------------------------------------------------------------------------------
+
+Prompt:
+Hi, could you please explain how real time systems handle RR, FIFO and DEADLINE sched options ? What behavior do they have, change and what are the most important things to think while using them.
+
 Question 4 : Avez-vous rencontré des problèmes lors de l'utilisation de l'IA (mauvaise compréhension des commandes fournies, résultats erronés, etc.)? Qu'avez-vous fait pour les régler?
+
+Enormement de resultats errones pour le debug, beaucoup d'hallucination et mauvaise comprehension du principe de temps reel et optimisations associees. Pour comprendre le sujet, trouver une information rapidement ou generer des commandes pour faciliter le developpement, les modeles d'IA sont tres performants cependant.
